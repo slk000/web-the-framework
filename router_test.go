@@ -10,7 +10,7 @@ import (
 )
 
 // Test add correct static paths
-func TestRouter_AddRouteStaticPath(t *testing.T) {
+func TestRouter_AddRouteStaticCorrect(t *testing.T) {
 	// The paths
 	testRoutes := []struct {
 		method string
@@ -81,12 +81,12 @@ func TestRouter_AddRouteStaticPath(t *testing.T) {
 	}
 
 	// Test
-	msg, ok := wantRouter.equal(r)
-	assert.True(t, ok, msg)
+	ok, err := wantRouter.equal(r)
+	assert.True(t, ok, err)
 }
 
 // Test add incorrect static paths
-func TestRouter_AddRoute2(t *testing.T) {
+func TestRouter_AddRouteStaticIncorrect(t *testing.T) {
 	var mockHandler = func(ctx *Context) {}
 	r := newRouter()
 	assert.Panicsf(t, func() {
@@ -112,8 +112,98 @@ func TestRouter_AddRoute2(t *testing.T) {
 	}, "duplicate node")
 }
 
-// Test find route node by path
-func TestRouter_FindRoute(t *testing.T) {
+// Test add correct wildcard paths
+func TestRouter_AddRouteWildcardCorrect(t *testing.T) {
+	// The paths
+	testRoutes := []struct {
+		method string
+		path   string
+	}{
+		{
+			method: http.MethodGet,
+			path:   "/user",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/*",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/*/home",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/nobody/home",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/*",
+		},
+	}
+	var mockHandler = func(ctx *Context) {}
+
+	// Construct the router
+	r := newRouter()
+	for _, route := range testRoutes {
+		r.AddRoute(route.method, route.path, mockHandler)
+	}
+
+	/*
+							*"/"
+						/		  \
+				*"user"		     *"*"
+				 /  \
+			 "nobody" "*"
+			   /       \
+		*"home(1)"   *"home(2)"
+
+
+	*/
+
+	// The expected router structure
+	home1 := &node{
+		path:    "home",
+		handler: mockHandler,
+	}
+	home2 := &node{
+		path:    "home",
+		handler: mockHandler,
+	}
+	nobody := &node{
+		path:     "nobody",
+		children: map[string]*node{"home": home1},
+	}
+	wildcardOfUser := &node{
+		children: map[string]*node{"home": home2},
+	}
+	user := &node{
+		path:     "user",
+		handler:  mockHandler,
+		children: map[string]*node{"nobody": nobody},
+		wildcard: wildcardOfUser,
+	}
+	wildcardOfRoot := &node{
+		handler: mockHandler,
+	}
+	root := &node{
+		path:     "/",
+		children: map[string]*node{"user": user},
+		wildcard: wildcardOfRoot,
+	}
+
+	wantRouter := &router{
+		trees: map[string]*node{
+			http.MethodGet: root,
+		},
+	}
+
+	// Test
+	ok, err := wantRouter.equal(r)
+	assert.True(t, ok, err)
+}
+
+// Test find route node by static path
+func TestRouter_FindRouteStatic(t *testing.T) {
 	// The paths to construct router
 	testRoutes := []struct {
 		method string
@@ -193,55 +283,157 @@ func TestRouter_FindRoute(t *testing.T) {
 			if tc.wantedNode == nil {
 				assert.Nil(t, foundNode)
 			} else {
-				_, ok := tc.wantedNode.equal(foundNode)
-				assert.True(t, ok)
+				ok, err := tc.wantedNode.equal(foundNode)
+				assert.True(t, ok, err)
 			}
 		})
 	}
 }
-func (r *router) equal(y *router) (string, bool) {
-	// 对森林中的每一个路由树进行比较
+
+// Test find route node by wildcard path
+func TestRouter_FindRouteWildcard(t *testing.T) {
+	// The paths to construct router
+	testRoutes := []struct {
+		method string
+		path   string
+	}{
+		{
+			method: http.MethodGet,
+			path:   "/*",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/*/home",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/nobody/home",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/",
+		},
+		{
+			method: http.MethodPost,
+			path:   "/*", // no child other than wildcard
+		},
+	}
+
+	var mockHandler = func(ctx *Context) {}
+
+	r := newRouter()
+	for _, route := range testRoutes {
+		r.AddRoute(route.method, route.path, mockHandler)
+	}
+
+	// Cases of path
+	testCases := []struct {
+		caseName   string
+		method     string
+		fullPath   string
+		wantedNode *node // Expected node
+	}{
+		{
+			caseName: "find /*",
+			method:   http.MethodGet,
+			fullPath: "/*",
+			wantedNode: &node{
+				path:    "*",
+				handler: mockHandler,
+			},
+		},
+		{
+			caseName: "find /user/nobody/home",
+			method:   http.MethodGet,
+			fullPath: "/user/nobody/home",
+			wantedNode: &node{
+				path:    "home",
+				handler: mockHandler,
+			},
+		},
+		{
+			caseName: "find /user/somebody/home",
+			method:   http.MethodGet,
+			fullPath: "/user/somebody/home",
+			wantedNode: &node{
+				path:    "home",
+				handler: mockHandler,
+			},
+		},
+		{
+			caseName: "find non-exist /user/somebody/homo",
+			method:   http.MethodGet,
+			fullPath: "/user/somebody/homo",
+		},
+		{
+			caseName: "a node has no child but a wildcard",
+			method:   http.MethodPost,
+			fullPath: "/bruh",
+			wantedNode: &node{
+				path:    "*",
+				handler: mockHandler,
+			},
+		},
+	}
+
+	// run sub-testcases
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			foundNode := r.FindRoute(tc.method, tc.fullPath)
+			if tc.wantedNode == nil {
+				assert.Nil(t, foundNode)
+			} else {
+				ok, err := tc.wantedNode.equal(foundNode)
+				assert.True(t, ok, err)
+			}
+		})
+	}
+}
+
+// Compare two routers.
+func (r *router) equal(other *router) (bool, error) {
+	// Compare each tree in the forest
 	for method, tree := range r.trees {
-		dst, ok := y.trees[method]
+		otherTree, ok := other.trees[method]
 		if !ok {
-			return fmt.Sprint("找不到对应的http method"), false
+			return false, fmt.Errorf("cannot find method %s in router\n", method)
 		}
-		// 递归比较这个树中的各节点
-		msg, equal := tree.equal(dst)
-		if !equal {
-			return msg, false
+		// Compare each node in tree recursively
+		ok, err := tree.equal(otherTree)
+		if !ok {
+			return false, err
 		}
 	}
-	return "", true
+	return true, nil
 
 }
-func (n *node) equal(that *node) (string, bool) {
+
+// Compare two nodes
+func (n *node) equal(that *node) (bool, error) {
 	if n.path != that.path {
-		return fmt.Sprint("节点路径不匹配"), false
+		return false, fmt.Errorf("different node path: %s vs %s\n", n.path, that.path)
 	}
 	if len(n.children) != len(that.children) {
-		return fmt.Sprint("子节点数量不匹配"), false
+		return false, fmt.Errorf("length of children not same: %d vs %d\n", len(n.children), len(that.children))
 	}
 
-	// 由于func()不可比，通过反射来比较handler
+	// Because functions are not comparable, use reflect value to compare
 	nHandler := reflect.ValueOf(n.handler)
-	yHandler := reflect.ValueOf(that.handler)
-	if nHandler != yHandler {
-
-		return fmt.Sprint("handler 不相等"), false
+	thatHandler := reflect.ValueOf(that.handler)
+	if nHandler != thatHandler {
+		return false, fmt.Errorf("different handlers")
 	}
 
 	for path, c := range n.children {
 		dst, ok := that.children[path]
 		if !ok {
-
-			return fmt.Sprintf("子节点 %s 不存在", path), false
+			return false, fmt.Errorf("child node %s not exist", path)
 		}
-		msg, ok := c.equal(dst)
+		ok, err := c.equal(dst)
 		if !ok {
-			return msg, false
+			return false, err
 		}
 
 	}
-	return "", true
+	return true, nil
 }

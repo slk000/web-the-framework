@@ -5,20 +5,25 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
 )
 
-func TestServer(t *testing.T) {
+func TestServerE2e(t *testing.T) {
 	h := NewHTTPServer()
 
-	h.AddRoute(http.MethodGet, "/user", func(ctx *Context) {
+	h.AddRoute(http.MethodGet, "/*", func(ctx *Context) {
 		ctx.Resp.WriteHeader(http.StatusOK)
-		ctx.Resp.Write([]byte("hello user"))
+		ctx.Resp.Write([]byte("what's your path?"))
 	})
-	h.AddRoute(http.MethodGet, "/user/home", func(ctx *Context) {
+	h.AddRoute(http.MethodGet, "/user/*/home", func(ctx *Context) {
 		ctx.Resp.WriteHeader(http.StatusOK)
-		ctx.Resp.Write([]byte("hello /user/home"))
+		ctx.Resp.Write([]byte(fmt.Sprintf("hello /user/*/home (%s)\n", ctx.Req.URL.Path)))
+	})
+	h.AddRoute(http.MethodGet, "/user/nobody/home", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte("nobody lives here"))
 	})
 	h.AddRoute(http.MethodGet, "/index", func(ctx *Context) {
 		ctx.Resp.WriteHeader(http.StatusOK)

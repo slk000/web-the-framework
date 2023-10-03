@@ -6,6 +6,7 @@ import "strings"
 type node struct {
 	path     string
 	children map[string]*node
+	wildcard *node // wildcard child node
 	handler  HandleFunc
 }
 
@@ -84,24 +85,42 @@ func (r *router) FindRoute(method, path string) *node {
 	path = strings.Trim(path, "/") // Remove leading and trailing '/'
 	segs := strings.Split(path, "/")
 	for _, seg := range segs {
-		root, ok = root.children[seg]
-		if !ok { // 当children是nil时，获取到的ok也是false
+		// find in normal children first
+		nextNode := root.children[seg]
+
+		// if not found, then check the wildcard child
+		if nextNode == nil {
+			nextNode = root.wildcard
+		}
+
+		// 404
+		if nextNode == nil {
 			return nil
 		}
+		root = nextNode
 	}
 	return root
 }
 
 // getOrCreateChild gets n's child node whose sub-path is seg. If not exist, create.
 func (n *node) getOrCreateChild(seg string) *node {
+	// init children nodes map
 	if n.children == nil {
 		n.children = map[string]*node{}
 	}
+
+	// is a wildcard child
+	if seg == "*" {
+		if n.wildcard == nil {
+			n.wildcard = &node{path: "*"}
+		}
+		return n.wildcard
+	}
+
+	// is a static child
 	res, ok := n.children[seg]
 	if !ok {
-		res = &node{
-			path: seg,
-		}
+		res = &node{path: seg}
 		n.children[seg] = res
 	}
 	return res
