@@ -10,6 +10,7 @@ var _ Server = &HTTPServer{}
 
 // HandleFunc is the type of handler function
 type HandleFunc func(ctx *Context)
+type param map[string]string
 
 // Server is an abstract type for any kind of server
 type Server interface {
@@ -40,11 +41,12 @@ func (h *HTTPServer) ServeHTTP(writer http.ResponseWriter, request *http.Request
 		Resp: writer,
 	}
 
-	routeNode := h.router.FindRoute(ctx.Req.Method, ctx.Req.URL.Path)
+	routeNode, pathParam := h.router.FindRoute(ctx.Req.Method, ctx.Req.URL.Path)
 	if routeNode == nil || routeNode.handler == nil {
 		http.NotFound(ctx.Resp, ctx.Req)
 		return
 	}
+	ctx.Param = pathParam
 	routeNode.handler(ctx)
 }
 

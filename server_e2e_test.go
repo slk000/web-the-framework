@@ -29,6 +29,10 @@ func TestServerE2e(t *testing.T) {
 		ctx.Resp.WriteHeader(http.StatusOK)
 		ctx.Resp.Write([]byte("hello /index"))
 	})
+	h.AddRoute(http.MethodGet, "/index/:msg1/bruh/:msg2", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("hello /index/:msg1/bruh/:msg2 [%v]", *ctx.Param)))
+	})
 
 	// Usage 1: delegate to http package
 	// http.ListenAndServe("8081", h)

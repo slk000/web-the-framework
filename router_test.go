@@ -83,6 +83,8 @@ func TestRouter_AddRouteStaticCorrect(t *testing.T) {
 	// Test
 	ok, err := wantRouter.equal(r)
 	assert.True(t, ok, err)
+	ok, err = r.equal(wantRouter)
+	assert.True(t, ok, err)
 }
 
 // Test add incorrect static paths
@@ -125,10 +127,6 @@ func TestRouter_AddRouteWildcardCorrect(t *testing.T) {
 		},
 		{
 			method: http.MethodGet,
-			path:   "/user/*",
-		},
-		{
-			method: http.MethodGet,
 			path:   "/user/*/home",
 		},
 		{
@@ -138,6 +136,10 @@ func TestRouter_AddRouteWildcardCorrect(t *testing.T) {
 		{
 			method: http.MethodGet,
 			path:   "/*",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/",
 		},
 	}
 	var mockHandler = func(ctx *Context) {}
@@ -173,22 +175,25 @@ func TestRouter_AddRouteWildcardCorrect(t *testing.T) {
 		path:     "nobody",
 		children: map[string]*node{"home": home1},
 	}
-	wildcardOfUser := &node{
+	wildcardChildOfUser := &node{
+		path:     "*",
 		children: map[string]*node{"home": home2},
 	}
 	user := &node{
-		path:     "user",
-		handler:  mockHandler,
-		children: map[string]*node{"nobody": nobody},
-		wildcard: wildcardOfUser,
+		path:          "user",
+		handler:       mockHandler,
+		children:      map[string]*node{"nobody": nobody},
+		wildcardChild: wildcardChildOfUser,
 	}
-	wildcardOfRoot := &node{
+	wildcardChildOfRoot := &node{
+		path:    "*",
 		handler: mockHandler,
 	}
 	root := &node{
-		path:     "/",
-		children: map[string]*node{"user": user},
-		wildcard: wildcardOfRoot,
+		path:          "/",
+		children:      map[string]*node{"user": user},
+		wildcardChild: wildcardChildOfRoot,
+		handler:       mockHandler,
 	}
 
 	wantRouter := &router{
@@ -200,6 +205,120 @@ func TestRouter_AddRouteWildcardCorrect(t *testing.T) {
 	// Test
 	ok, err := wantRouter.equal(r)
 	assert.True(t, ok, err)
+	ok, err = r.equal(wantRouter)
+	assert.True(t, ok, err)
+}
+
+func TestRouter_AddRouteWildcardIncorrect(t *testing.T) {
+	var mockHandler = func(ctx *Context) {}
+	r := newRouter()
+	assert.NotPanics(t, func() {
+		r.AddRoute(http.MethodGet, "/home/*", mockHandler)
+	})
+	assert.Panicsf(t, func() {
+		r.AddRoute(http.MethodGet, "/home/*", mockHandler)
+	}, "Duplicate wildcard node")
+}
+
+// Test add correct param paths
+func TestRouter_AddRouteParamCorrect(t *testing.T) {
+	// The paths
+	testRoutes := []struct {
+		method string
+		path   string
+	}{
+		{
+			method: http.MethodGet,
+			path:   "/:msg",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/:id/home",
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/nobody/home",
+		},
+	}
+	var mockHandler = func(ctx *Context) {}
+
+	// Construct the router
+	r := newRouter()
+	for _, route := range testRoutes {
+		r.AddRoute(route.method, route.path, mockHandler)
+	}
+
+	/*
+							*"/"
+						/		  \
+				*"user"		     *":msg"
+				 /  \
+			 "nobody" ":id"
+			   /       \
+		*"home(1)"   *"home(2)"
+
+
+	*/
+
+	// The expected router structure
+	home1 := &node{
+		path:    "home",
+		handler: mockHandler,
+	}
+	home2 := &node{
+		path:    "home",
+		handler: mockHandler,
+	}
+	nobody := &node{
+		path:     "nobody",
+		children: map[string]*node{"home": home1},
+	}
+	paramChildOfUser := &node{
+		path:     ":id",
+		children: map[string]*node{"home": home2},
+	}
+	user := &node{
+		path:       "user",
+		handler:    mockHandler,
+		children:   map[string]*node{"nobody": nobody},
+		paramChild: paramChildOfUser,
+	}
+	paramChildOfRoot := &node{
+		path:    ":msg",
+		handler: mockHandler,
+	}
+	root := &node{
+		path:       "/",
+		children:   map[string]*node{"user": user},
+		paramChild: paramChildOfRoot,
+	}
+
+	wantRouter := &router{
+		trees: map[string]*node{
+			http.MethodGet: root,
+		},
+	}
+
+	// Test
+	ok, err := wantRouter.equal(r)
+	assert.True(t, ok, err)
+	ok, err = r.equal(wantRouter)
+	assert.True(t, ok, err)
+}
+
+func TestRouter_AddRouteParamIncorrect(t *testing.T) {
+	var mockHandler = func(ctx *Context) {}
+	r := newRouter()
+	assert.NotPanics(t, func() {
+		r.AddRoute(http.MethodGet, "/home/:id", mockHandler)
+	})
+	assert.Panicsf(t, func() {
+		r.AddRoute(http.MethodGet, "/home/:id", mockHandler)
+	}, "Duplicate wildcard node")
 }
 
 // Test find route node by static path
@@ -279,7 +398,7 @@ func TestRouter_FindRouteStatic(t *testing.T) {
 	// run sub-testcases
 	for _, tc := range testCases {
 		t.Run(tc.caseName, func(t *testing.T) {
-			foundNode := r.FindRoute(tc.method, tc.fullPath)
+			foundNode, _ := r.FindRoute(tc.method, tc.fullPath)
 			if tc.wantedNode == nil {
 				assert.Nil(t, foundNode)
 			} else {
@@ -290,7 +409,7 @@ func TestRouter_FindRouteStatic(t *testing.T) {
 	}
 }
 
-// Test find route node by wildcard path
+// Test find route node by wildcardChild path
 func TestRouter_FindRouteWildcard(t *testing.T) {
 	// The paths to construct router
 	testRoutes := []struct {
@@ -315,7 +434,7 @@ func TestRouter_FindRouteWildcard(t *testing.T) {
 		},
 		{
 			method: http.MethodPost,
-			path:   "/*", // no child other than wildcard
+			path:   "/*", // no child other than wildcardChild
 		},
 	}
 
@@ -366,7 +485,7 @@ func TestRouter_FindRouteWildcard(t *testing.T) {
 			fullPath: "/user/somebody/homo",
 		},
 		{
-			caseName: "a node has no child but a wildcard",
+			caseName: "a node has no child but a wildcardChild",
 			method:   http.MethodPost,
 			fullPath: "/bruh",
 			wantedNode: &node{
@@ -379,7 +498,7 @@ func TestRouter_FindRouteWildcard(t *testing.T) {
 	// run sub-testcases
 	for _, tc := range testCases {
 		t.Run(tc.caseName, func(t *testing.T) {
-			foundNode := r.FindRoute(tc.method, tc.fullPath)
+			foundNode, _ := r.FindRoute(tc.method, tc.fullPath)
 			if tc.wantedNode == nil {
 				assert.Nil(t, foundNode)
 			} else {
@@ -416,12 +535,24 @@ func (n *node) equal(that *node) (bool, error) {
 	if len(n.children) != len(that.children) {
 		return false, fmt.Errorf("length of children not same: %d vs %d\n", len(n.children), len(that.children))
 	}
+	if n.wildcardChild != nil {
+		ok, err := n.wildcardChild.equal(that.wildcardChild)
+		if !ok {
+			return ok, err
+		}
+	}
+	if n.paramChild != nil {
+		ok, err := n.paramChild.equal(that.paramChild)
+		if !ok {
+			return ok, err
+		}
+	}
 
 	// Because functions are not comparable, use reflect value to compare
 	nHandler := reflect.ValueOf(n.handler)
 	thatHandler := reflect.ValueOf(that.handler)
 	if nHandler != thatHandler {
-		return false, fmt.Errorf("different handlers")
+		return false, fmt.Errorf("handlers not match")
 	}
 
 	for path, c := range n.children {

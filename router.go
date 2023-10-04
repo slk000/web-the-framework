@@ -4,10 +4,11 @@ import "strings"
 
 // node of a router tree
 type node struct {
-	path     string
-	children map[string]*node
-	wildcard *node // wildcard child node
-	handler  HandleFunc
+	path          string           // sub-path of this node
+	children      map[string]*node // normal children nodes
+	wildcardChild *node            // wildcardChild child node
+	paramChild    *node            // param child node
+	handler       HandleFunc
 }
 
 // router tree (actually router forest)
@@ -30,10 +31,10 @@ func (r *router) AddRoute(method string, path string, handleFunc HandleFunc) {
 		panic("empty path")
 	}
 	if path[0] != '/' {
-		panic("path not start with /")
+		panic("path should start with /")
 	}
 	if path != "/" && path[len(path)-1] == '/' {
-		panic("path end with /")
+		panic("path should not end with /")
 	}
 
 	// Get the router tree of method
@@ -55,13 +56,13 @@ func (r *router) AddRoute(method string, path string, handleFunc HandleFunc) {
 	}
 
 	path = path[1:] // Remove leading '/', or "/a/b" will be Split to ["", "a", "b"]
-	segs := strings.Split(path, "/")
-	for _, seg := range segs {
-		if seg == "" {
+	subPaths := strings.Split(path, "/")
+	for _, subPath := range subPaths {
+		if subPath == "" {
 			panic("Continuous '/' in path")
 		}
-		children := root.getOrCreateChild(seg)
-		root = children
+		child := root.getOrCreateChild(subPath)
+		root = child
 	}
 	if root.handler != nil {
 		panic("Duplicate node")
@@ -70,58 +71,73 @@ func (r *router) AddRoute(method string, path string, handleFunc HandleFunc) {
 }
 
 // FindRoute finds a node of given method and path
-func (r *router) FindRoute(method, path string) *node {
+func (r *router) FindRoute(method, path string) (*node, *param) {
 	root, ok := r.trees[method]
 	if !ok {
 		// No such method
-		return nil
+		return nil, nil
 	}
 
 	// root
 	if path == "/" {
-		return root
+		return root, nil
 	}
 
 	path = strings.Trim(path, "/") // Remove leading and trailing '/'
-	segs := strings.Split(path, "/")
-	for _, seg := range segs {
-		// find in normal children first
-		nextNode := root.children[seg]
-
-		// if not found, then check the wildcard child
-		if nextNode == nil {
-			nextNode = root.wildcard
+	subPaths := strings.Split(path, "/")
+	var params param
+	for _, subPath := range subPaths {
+		// Priority: static > param > wildcard
+		if root.children[subPath] != nil {
+			root = root.children[subPath]
+		} else if root.paramChild != nil {
+			if params == nil {
+				params = make(map[string]string)
+			}
+			//TODO check duplication
+			params[root.paramChild.path[1:]] = subPath
+			root = root.paramChild
+		} else if root.wildcardChild != nil {
+			root = root.wildcardChild
+		} else {
+			// 404
+			return nil, nil
 		}
-
-		// 404
-		if nextNode == nil {
-			return nil
-		}
-		root = nextNode
 	}
-	return root
+	return root, &params
 }
 
-// getOrCreateChild gets n's child node whose sub-path is seg. If not exist, create.
-func (n *node) getOrCreateChild(seg string) *node {
+// getOrCreateChild gets n's child node whose sub-path is subPath. If not exist, create.
+func (n *node) getOrCreateChild(subPath string) *node {
+	//if len(subPath) == 0 {
+	//	return nil
+	//}
+
+	// is a param child
+	if subPath[0] == ':' {
+		if n.paramChild == nil {
+			n.paramChild = &node{path: subPath}
+		}
+		return n.paramChild
+	}
+
+	// is a wildcard child
+	if subPath == "*" {
+		if n.wildcardChild == nil {
+			n.wildcardChild = &node{path: "*"}
+		}
+		return n.wildcardChild
+	}
+
+	// is a static child
 	// init children nodes map
 	if n.children == nil {
 		n.children = map[string]*node{}
 	}
-
-	// is a wildcard child
-	if seg == "*" {
-		if n.wildcard == nil {
-			n.wildcard = &node{path: "*"}
-		}
-		return n.wildcard
-	}
-
-	// is a static child
-	res, ok := n.children[seg]
+	res, ok := n.children[subPath]
 	if !ok {
-		res = &node{path: seg}
-		n.children[seg] = res
+		res = &node{path: subPath}
+		n.children[subPath] = res
 	}
 	return res
 }
