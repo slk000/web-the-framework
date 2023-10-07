@@ -67,6 +67,11 @@ func (r *router) AddRoute(method string, path string, handleFunc HandleFunc) {
 	if root.handler != nil {
 		panic("Duplicate node")
 	}
+	// for trailing wildcard, I make it points to itself, so that can pairs anything left
+	//
+	if subPaths[len(subPaths)-1] == "*" {
+		root.wildcardChild = root
+	}
 	root.handler = handleFunc
 }
 

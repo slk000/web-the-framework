@@ -25,13 +25,40 @@ func TestServerE2e(t *testing.T) {
 		ctx.Resp.WriteHeader(http.StatusOK)
 		ctx.Resp.Write([]byte("nobody lives here"))
 	})
+	// trailing wildcard VS more specific route
+	// only something like "/user/something/home" gets matched with "/user/*/home".
+	// "/user/*/not_home" fallback to :/user/*".
+	// we DO NOT support "user/*/not_home/something" fallback to "/user/*
+	h.AddRoute(http.MethodGet, "/user/*", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("/user/* %s\n", ctx.Req.URL.Path)))
+	})
+
 	h.AddRoute(http.MethodGet, "/index", func(ctx *Context) {
 		ctx.Resp.WriteHeader(http.StatusOK)
 		ctx.Resp.Write([]byte("hello /index"))
 	})
+
+	// param
 	h.AddRoute(http.MethodGet, "/index/:msg1/bruh/:msg2", func(ctx *Context) {
 		ctx.Resp.WriteHeader(http.StatusOK)
 		ctx.Resp.Write([]byte(fmt.Sprintf("hello /index/:msg1/bruh/:msg2 [%v]", *ctx.Param)))
+	})
+
+	// trailing wildcard matches anything after it --> /a/(b/c/d/e/f...)
+	h.AddRoute(http.MethodGet, "/a/*", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("trailing wildcard /a/* %s\n", ctx.Req.URL.Path)))
+	})
+	// not a trailing wildcard
+	h.AddRoute(http.MethodGet, "/aa/*/bb", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("/aa/*/bb %s\n", ctx.Req.URL.Path)))
+	})
+	// /aa/*/cc/* (also match anything left)
+	h.AddRoute(http.MethodGet, "/aa/*/cc/*", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("/aa/*/cc/* %s\n", ctx.Req.URL.Path)))
 	})
 
 	// Usage 1: delegate to http package

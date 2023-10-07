@@ -34,7 +34,7 @@ func NewHTTPServer() *HTTPServer {
 type HTTPSServer struct {
 }
 
-// ServeHTTP serves a HTTP request: parses route and executes handler
+// ServeHTTP serves an HTTP request: parses route and executes handler
 func (h *HTTPServer) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	ctx := &Context{
 		Req:  request,

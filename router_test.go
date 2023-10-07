@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -50,33 +51,32 @@ func TestRouter_AddRouteStaticCorrect(t *testing.T) {
 	*/
 
 	// The expected router structure
+	home := &node{
+		path:    "home",
+		handler: mockHandler,
+	}
+	detail := &node{
+		path:    "detail",
+		handler: mockHandler,
+	}
+	order := &node{
+		path:     "order",
+		children: map[string]*node{"detail": detail},
+	}
+	user := &node{
+		path:     "user",
+		handler:  mockHandler,
+		children: map[string]*node{"home": home},
+	}
+	root := &node{
+		path:     "/",
+		handler:  mockHandler,
+		children: map[string]*node{"user": user, "order": order},
+	}
+
 	wantRouter := &router{
 		trees: map[string]*node{
-			http.MethodGet: &node{
-				path:    "/",
-				handler: mockHandler,
-				children: map[string]*node{
-					"user": &node{
-						path:    "user",
-						handler: mockHandler,
-						children: map[string]*node{
-							"home": &node{
-								path:    "home",
-								handler: mockHandler,
-							},
-						},
-					},
-					"order": &node{
-						path: "order",
-						children: map[string]*node{
-							"detail": &node{
-								path:    "detail",
-								handler: mockHandler,
-							},
-						},
-					},
-				},
-			},
+			http.MethodGet: root,
 		},
 	}
 
@@ -91,27 +91,38 @@ func TestRouter_AddRouteStaticCorrect(t *testing.T) {
 func TestRouter_AddRouteStaticIncorrect(t *testing.T) {
 	var mockHandler = func(ctx *Context) {}
 	r := newRouter()
+
+	// Empty path is not allowed
 	assert.Panicsf(t, func() {
 		r.AddRoute(http.MethodGet, "", mockHandler)
-	}, "empty path")
+	}, "Empty path is not allowed")
+
+	// Path should not end with '/'
 	assert.Panicsf(t, func() {
 		r.AddRoute(http.MethodGet, "/a/", mockHandler)
-	}, "end with /")
+	}, "Path should not end with '/'")
+
+	// Path should start with '/'
 	assert.Panicsf(t, func() {
 		r.AddRoute(http.MethodGet, "d/d", mockHandler)
-	}, "not start with /")
+	}, "Path should start with '/'")
+
+	// Path should not contain continuous '/'
 	assert.Panicsf(t, func() {
 		r.AddRoute(http.MethodGet, "/d//d", mockHandler)
-	}, "continuous /")
+	}, "Path should not contain continuous '/'")
 
+	// Duplicate node: root
 	r.AddRoute(http.MethodGet, "/", mockHandler)
 	assert.Panicsf(t, func() {
 		r.AddRoute(http.MethodGet, "/", mockHandler)
-	}, "duplicate root node")
+	}, "Duplicate node: root")
+
+	// Duplicate node
 	r.AddRoute(http.MethodGet, "/a", mockHandler)
 	assert.Panicsf(t, func() {
 		r.AddRoute(http.MethodGet, "/a", mockHandler)
-	}, "duplicate node")
+	}, "Duplicate node")
 }
 
 // Test add correct wildcard paths
@@ -189,6 +200,7 @@ func TestRouter_AddRouteWildcardCorrect(t *testing.T) {
 		path:    "*",
 		handler: mockHandler,
 	}
+	wildcardChildOfRoot.wildcardChild = wildcardChildOfRoot // path "/*" has a trailing wildcard
 	root := &node{
 		path:          "/",
 		children:      map[string]*node{"user": user},
@@ -318,10 +330,10 @@ func TestRouter_AddRouteParamIncorrect(t *testing.T) {
 	})
 	assert.Panicsf(t, func() {
 		r.AddRoute(http.MethodGet, "/home/:id", mockHandler)
-	}, "Duplicate wildcard node")
+	}, "Duplicate param node")
 }
 
-// Test find route node by static path
+// Test: find route node by static path
 func TestRouter_FindRouteStatic(t *testing.T) {
 	// The paths to construct router
 	testRoutes := []struct {
@@ -385,7 +397,7 @@ func TestRouter_FindRouteStatic(t *testing.T) {
 			wantedNode: nil,
 		},
 		{
-			caseName: "root",
+			caseName: "find root",
 			method:   http.MethodPost,
 			fullPath: "/",
 			wantedNode: &node{
@@ -409,7 +421,7 @@ func TestRouter_FindRouteStatic(t *testing.T) {
 	}
 }
 
-// Test find route node by wildcardChild path
+// Test: find route node by wildcard path
 func TestRouter_FindRouteWildcard(t *testing.T) {
 	// The paths to construct router
 	testRoutes := []struct {
@@ -435,6 +447,19 @@ func TestRouter_FindRouteWildcard(t *testing.T) {
 		{
 			method: http.MethodPost,
 			path:   "/*", // no child other than wildcardChild
+		},
+		// test trailing wildcard
+		{
+			method: http.MethodPut,
+			path:   "/a/*", // test: when route path ends with wildcard, match all things after. eg. /a/(b) /a/(b/c/d)
+		},
+		{
+			method: http.MethodPut,
+			path:   "/a/*/b", // more specific route even there is a general "/a/*"
+		},
+		{
+			method: http.MethodPut,
+			path:   "/aa/*/bb", // not trailing
 		},
 	}
 
@@ -493,6 +518,67 @@ func TestRouter_FindRouteWildcard(t *testing.T) {
 				handler: mockHandler,
 			},
 		},
+		// next 3 cases: when route path ends with wildcard, match all things after.
+		{
+			caseName: "trilling wildcard: '/a/*'",
+			method:   http.MethodPut,
+			fullPath: "/a/b/c/d/ef",
+			wantedNode: &node{
+				path:    "*",
+				handler: mockHandler,
+				children: map[string]*node{
+					"b": &node{
+						path:    "b",
+						handler: mockHandler,
+					},
+				},
+			},
+		},
+		{
+			caseName: "more specific route '/a/*/b' even there is a trailing wildcard parent '/a/*'",
+			method:   http.MethodPut,
+			fullPath: "/a/whatever/b",
+			wantedNode: &node{
+				path:    "b",
+				handler: mockHandler,
+			},
+		},
+		{
+			caseName: "if more specific path not match, fallback to '/a/*'",
+			method:   http.MethodPut,
+			fullPath: "/a/whatever/bb",
+			wantedNode: &node{
+				path:    "*",
+				handler: mockHandler,
+				children: map[string]*node{
+					"b": &node{
+						path:    "b",
+						handler: mockHandler,
+					},
+				},
+			},
+		},
+		{
+			caseName:   "more specific route but not match '/a/*/b",
+			method:     http.MethodPut,
+			fullPath:   "/a/whatever/b/c",
+			wantedNode: nil, // do not fallback to "/a/*"
+		},
+		{
+			caseName: "not trilling wildcard1",
+			method:   http.MethodPut,
+			fullPath: "/aa/*/bb",
+			wantedNode: &node{
+				path:    "bb",
+				handler: mockHandler,
+			},
+		},
+		{
+			caseName:   "not trilling wildcard2",
+			method:     http.MethodPut,
+			fullPath:   "/aa/*/cc",
+			wantedNode: nil,
+		},
 	}
 
 	// run sub-testcases
@@ -536,11 +622,22 @@ func (n *node) equal(that *node) (bool, error) {
 		return false, fmt.Errorf("length of children not same: %d vs %d\n", len(n.children), len(that.children))
 	}
 	if n.wildcardChild != nil {
-		ok, err := n.wildcardChild.equal(that.wildcardChild)
-		if !ok {
-			return ok, err
+		var ok bool
+		var err error
+		// if this node is a trailing wildcard, do not compare recursively
+		if n.wildcardChild == n {
+			if that.wildcardChild != that {
+				// that.wildcardChild should also point to itself
+				return false, errors.New("trailing wildcard child not point to itself")
+			}
+		} else {
+			ok, err = n.wildcardChild.equal(that.wildcardChild)
+			if !ok {
+				return ok, err
+			}
 		}
 	}
+
 	if n.paramChild != nil {
 		ok, err := n.paramChild.equal(that.paramChild)
 		if !ok {
