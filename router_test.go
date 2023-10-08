@@ -3,13 +3,18 @@ package web
 import (
 	"errors"
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"net/http"
 	"reflect"
+	"regexp"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
+/*
+*****************
+	AddRoute
+*****************
+*/
 // Test add correct static paths
 func TestRouter_AddRouteStaticCorrect(t *testing.T) {
 	// The paths
@@ -333,6 +338,182 @@ func TestRouter_AddRouteParamIncorrect(t *testing.T) {
 	}, "Duplicate param node")
 }
 
+func TestRouter_AddRouteRegexpCorrect(t *testing.T) {
+	testRoutes := []struct {
+		method string
+		path   string
+	}{
+		{
+			method: http.MethodGet,
+			path:   "/user/:role((.*)_.*)", // "/user/admin_a" -> role=admin
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/:role((.*)_.*)/home",
+		},
+		{
+			method: http.MethodPost,
+			path:   "/validFormat/a/:(.*)",
+		},
+		{
+			method: http.MethodPost,
+			path:   "/validFormat/b/:()",
+		},
+		{
+			method: http.MethodPost,
+			path:   "/testParamChild/:paramChild",
+		},
+		//{
+		//	method: http.MethodGet,
+		//	path:   "/user/:role(AdminA)",
+		//},
+		//{
+		//	method: http.MethodGet,
+		//	path:   "/user/:role(AdminB)/home",
+		//},
+		//{
+		//	method: http.MethodGet,
+		//	path:   "/user/:role(AdminC)",
+		//},
+		//{
+		//	method: http.MethodGet,
+		//	path:   "/user/:role(AdminC)/home",
+		//},
+		//{
+		//	method: http.MethodGet,
+		//	path:   "/user/:role(UserA)",
+		//},
+		//{
+		//	method: http.MethodGet,
+		//	path:   "/user/:role(UserA)/home",
+		//},
+		{
+			method: http.MethodGet,
+			path:   "/:id((\\d+))",
+		},
+	}
+	var mockHandler = func(ctx *Context) {}
+
+	// Construct the router
+	r := newRouter()
+	for _, route := range testRoutes {
+		r.AddRoute(route.method, route.path, mockHandler)
+	}
+
+	/* GET
+	   			"/"
+	   		/         \
+	   	"user"       *":id(\d*)"
+	   	  |
+	     *":role((.*)_.*)"
+	   	  |
+	        *home
+	*/
+	home := &node{
+		path:    "home",
+		handler: mockHandler,
+	}
+	role := &node{
+		path:     ":role((.*)_.*)",
+		children: map[string]*node{"home": home},
+	}
+	user := &node{
+		path:        "user",
+		regexpChild: role,
+		regexp:      regexp.MustCompile(":(.*)_.*"),
+	}
+	id := &node{
+		path:    ":id(\\d+)",
+		handler: mockHandler,
+	}
+	getRoot := &node{
+		path:        "/",
+		children:    map[string]*node{"user": user},
+		regexpChild: id,
+		regexp:      regexp.MustCompile("\\d+"),
+	}
+
+	/* POST
+	   			          "/"
+	   			  /		           \
+	   		"validFormat"      "testParamChild"
+	   		/			\			\
+	          "a"          "b"			*":paramChild"
+	   		|			|
+	        *":(.*)"	  *":()"
+	*/
+	regexpChildOfA := &node{
+		path:    ":(.*)",
+		handler: mockHandler,
+	}
+	regexpChildOfB := &node{
+		path:    ":()",
+		handler: mockHandler,
+	}
+	a := &node{
+		path:        "a",
+		regexp:      regexp.MustCompile(".*"),
+		regexpChild: regexpChildOfA,
+	}
+	b := &node{
+		path:        "b",
+		regexp:      regexp.MustCompile(""),
+		regexpChild: regexpChildOfB,
+	}
+	validFormat := &node{
+		path:     "validFormat",
+		children: map[string]*node{"a": a, "b": b},
+	}
+
+	paramChild := &node{
+		path:    ":paramChild",
+		handler: mockHandler,
+	}
+	testParamChild := &node{
+		path:       "testParamChild",
+		paramChild: paramChild,
+	}
+	postRoot := &node{
+		path:     "/",
+		children: map[string]*node{"validFormat": validFormat, "testParamChild": testParamChild},
+	}
+
+	wantRouter := &router{
+		trees: map[string]*node{
+			http.MethodGet:  getRoot,
+			http.MethodPost: postRoot,
+		},
+	}
+	// Test
+	ok, err := wantRouter.equal(r)
+	assert.True(t, ok, err)
+	ok, err = r.equal(wantRouter)
+	assert.True(t, ok, err)
+
+}
+
+func TestRouter_AddRouteRegexpIncorrect(t *testing.T) {
+	var mockHandler = func(ctx *Context) {}
+	r := newRouter()
+	assert.NotPanics(t, func() {
+		r.AddRoute(http.MethodGet, "/home/:a(.+)", mockHandler)
+	})
+	assert.Panicsf(t, func() {
+		r.AddRoute(http.MethodGet, "/home/:b(.*)", mockHandler)
+	}, "Duplicate regexp node")
+
+	// Incorrect regex expression
+	assert.Panicsf(t, func() {
+		r.AddRoute(http.MethodGet, "/a/:a(\\)", mockHandler)
+	}, "Invalid regexp")
+
+}
+
+/*
+*****************
+	FindRoute
+*****************
+*/
 // Test: find route node by static path
 func TestRouter_FindRouteStatic(t *testing.T) {
 	// The paths to construct router
@@ -577,6 +758,129 @@ func TestRouter_FindRouteWildcard(t *testing.T) {
 			caseName:   "not trilling wildcard2",
 			method:     http.MethodPut,
 			fullPath:   "/aa/*/cc",
+			wantedNode: nil,
+		},
+	}
+
+	// run sub-testcases
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			foundNode, _ := r.FindRoute(tc.method, tc.fullPath)
+			if tc.wantedNode == nil {
+				assert.Nil(t, foundNode)
+			} else {
+				ok, err := tc.wantedNode.equal(foundNode)
+				assert.True(t, ok, err)
+			}
+		})
+	}
+}
+
+func TestRouter_FindRouteRegexp(t *testing.T) {
+	// The paths to construct router
+	testRoutes := []struct {
+		method string
+		path   string
+	}{
+		{
+			method: http.MethodGet,
+			path:   "/user/:role((.*)_.*)", // "/user/admin_a" -> role=admin
+		},
+		{
+			method: http.MethodGet,
+			path:   "/user/:role((.*)_.*)/home",
+		},
+		{
+			method: http.MethodPost,
+			path:   "/validFormat/a/:(.*)",
+		},
+		{
+			method: http.MethodPost,
+			path:   "/validFormat/b/:()",
+		},
+		{
+			method: http.MethodPost,
+			path:   "/testParamChild/:paramChild",
+		},
+		{
+			method: http.MethodPut,
+			path:   "/:id((\\d+))",
+		},
+	}
+
+	var mockHandler = func(ctx *Context) {}
+
+	r := newRouter()
+	for _, route := range testRoutes {
+		r.AddRoute(route.method, route.path, mockHandler)
+	}
+
+	// Expected nodes
+	home := &node{
+		path:    "home",
+		handler: mockHandler,
+	}
+	role := &node{
+		path:     ":role((.*)_.*)",
+		handler:  mockHandler,
+		children: map[string]*node{"home": home},
+	}
+	// Cases of path
+	testCases := []struct {
+		caseName   string
+		method     string
+		fullPath   string
+		wantedNode *node // Expected node
+	}{
+		{
+			caseName:   "test match /user/:role((.*)_.*)",
+			method:     http.MethodGet,
+			fullPath:   "/user/admin_abc",
+			wantedNode: role,
+		},
+		{
+			caseName:   "test not match /user/:role((.*)_.*)",
+			method:     http.MethodGet,
+			fullPath:   "/user/admin",
+			wantedNode: nil,
+		},
+		{
+			caseName: "test match /user/:role((.*)_.*)/home",
+			method:   http.MethodGet,
+			fullPath: "/user/admin_abc/home",
+			wantedNode: &node{
+				path:    "home",
+				handler: mockHandler,
+			},
+		},
+		{
+			caseName:   "test not match /user/:role((.*)_.*)/home",
+			method:     http.MethodGet,
+			fullPath:   "/user/admin/home",
+			wantedNode: nil,
+		},
+		{
+			caseName: "test match /validFormat/a/:(.*)",
+			method:   http.MethodPost,
+			fullPath: "/validFormat/a/abcdef",
+			wantedNode: &node{
+				path:    ":(.*)",
+				handler: mockHandler,
+			},
+		},
+		{
+			caseName: "test match /:id((\\d+))", // /:id((\d*))
+			method:   http.MethodPut,
+			fullPath: "/1234",
+			wantedNode: &node{
+				path:    ":id((\\d+))",
+				handler: mockHandler,
+			},
+		},
+		{
+			caseName:   "test not match /:id((\\d+))", // /:id((\d*))
+			method:     http.MethodPut,
+			fullPath:   "/notNumber",
 			wantedNode: nil,
 		},
 	}

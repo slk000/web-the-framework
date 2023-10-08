@@ -61,6 +61,23 @@ func TestServerE2e(t *testing.T) {
 		ctx.Resp.Write([]byte(fmt.Sprintf("/aa/*/cc/* %s\n", ctx.Req.URL.Path)))
 	})
 
+	// Regexp
+	h.AddRoute(http.MethodGet, "/regexp/:key((\\d+))", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("Route: /regexp/:key((\\d+)) \nPath: %s", ctx.Req.URL.Path)))
+	})
+	h.AddRoute(http.MethodGet, "/regexp/user/:role((.+)_.+)", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("Route: /regexp/:role((.+)_.+) \nPath: %s\nParams:%v", ctx.Req.URL.Path, ctx.Param)))
+	})
+	h.AddRoute(http.MethodGet, "/regexp/multi1/:key1:key2:key3((\\d+)([a-z]+)(\\d+))", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("Route: /regexp/multi/:key1:key2:key3((\\d+)([a-z]+)(\\d+))\nPath: %s\nParams: %v", ctx.Req.URL.Path, ctx.Param)))
+	})
+	h.AddRoute(http.MethodGet, "/regexp/multi2/:key2:key3(\\d+([a-z]+)(\\d+))", func(ctx *Context) {
+		ctx.Resp.WriteHeader(http.StatusOK)
+		ctx.Resp.Write([]byte(fmt.Sprintf("Route: /regexp/multi/:key1:key2:key3(\\d+([a-z]+)(\\d+))\nPath: %s\nParams: %v", ctx.Req.URL.Path, ctx.Param)))
+	})
 	// Usage 1: delegate to http package
 	// http.ListenAndServe("8081", h)
 	// http.ListenAndServeTLS("443", "", "", h)
