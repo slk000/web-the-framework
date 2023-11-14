@@ -1,4 +1,4 @@
-module web-framework
+module github.com/slk000/web-the-framework
 
 go 1.20
 

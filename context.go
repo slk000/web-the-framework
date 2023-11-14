@@ -8,12 +8,15 @@ import (
 )
 
 type Context struct {
-    Req  *http.Request
-    Resp http.ResponseWriter
-    Param *param
-    urlQueries url.Values  // Cache the url queries
+    Req        *http.Request
+    Resp       http.ResponseWriter
+    Param      *param
+    urlQueries url.Values // Cache the url queries
 }
 
+/*
+    Fill JSON data into val
+*/
 func (c *Context) BindJSON(val any) error {
     if c.Req.Body == nil {
         return errors.New("body is nil")
@@ -28,7 +31,7 @@ func (c *Context) BindJSON(val any) error {
 }
 
 func (c *Context) FormValue(key string) (string, error) {
-    // parsing multiple times is ok 
+    // parsing multiple times is ok
     err := c.Req.ParseForm()
     if err != nil {
         return "", err
@@ -41,8 +44,11 @@ func (c *Context) FormValue(key string) (string, error) {
 
 /*
 func (c *Context) BindForm(val any) error {
-    
+
 }
+*/
+/* 
+    Get a query param
 */
 func (c *Context) QueryValue(key string) string {
     if c.urlQueries == nil {
@@ -52,10 +58,9 @@ func (c *Context) QueryValue(key string) string {
     return c.urlQueries.Get(key)
 }
 
+/*
+    Get the value of path param
+*/
 func (c *Context) PathValue(key string) string {
     return (*c.Param)[key]
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
 }
