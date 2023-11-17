@@ -19,12 +19,12 @@ func TestContextE2e(t *testing.T) {
 		d := &data{0, "000"}
 		err := ctx.BindJSON(d)
 		if err != nil {
-			ctx.Resp.WriteHeader(http.StatusBadRequest)
-			ctx.Resp.Write([]byte("bad request format"))
+			ctx.resp.WriteHeader(http.StatusBadRequest)
+			ctx.resp.Write([]byte("bad request format"))
 			return
 		}
-		ctx.Resp.WriteHeader(http.StatusOK)
-		ctx.Resp.Write([]byte(fmt.Sprintf("%v", d)))
+		ctx.resp.WriteHeader(http.StatusOK)
+		ctx.resp.Write([]byte(fmt.Sprintf("%v", d)))
 	})
 	h.Start(":8001")
 

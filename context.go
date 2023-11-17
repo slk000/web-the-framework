@@ -8,10 +8,12 @@ import (
 )
 
 type Context struct {
-	Req        *http.Request
-	Resp       http.ResponseWriter
-	Param      *param
-	urlQueries url.Values // Cache the url queries
+	Req             *http.Request
+	resp            http.ResponseWriter
+	Param           *param
+	urlQueries      url.Values // Cache the url queries
+	StatusCode      int        // to allow middlewares alter the response data, store the code to be sent
+	ResponseContent []byte     // also the content to be sent
 }
 
 // BindJSON fills val with JSON data
